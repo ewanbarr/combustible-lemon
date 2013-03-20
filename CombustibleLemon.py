@@ -3,7 +3,6 @@ import sys
 import glob
 import warnings
 import time
-import MySQLdb as sql
 import sqlite3 
 import tempfile
 import numpy as np
@@ -138,7 +137,8 @@ MPL_STYLE = {
     "xtick.color": "lightblue",
     "ytick.color": "lightblue",
     "figure.facecolor":"black",
-    "figure.edgecolor":"black"
+    "figure.edgecolor":"black",
+    "text.usetex":False
 }
 
 mpl.rcParams.update(MPL_STYLE)
@@ -364,6 +364,10 @@ class GUIOptions(object):
             self.ax_opts_frame,text="Replot",command=self.parent.plotter.plot,
             padx=2, pady=6, **DEFAULT_STYLE_2)
         self.replot_button.pack(side=tk.BOTTOM,fill=tk.X,expand=1)
+        tk.Label(self.mode_select_frame,text="Mode:"
+                 ).pack(side=tk.LEFT,fill=tk.X,expand=1)
+        tk.Label(self.view_toggle_frame,text="Toggle types:",pady=4
+                 ).pack(side=tk.TOP,fill=tk.X,expand=1)
         self.mode_var = tk.StringVar()
         self.mode_var.set("viewed")
         self._add_select_mode("RFI",RFI) 
