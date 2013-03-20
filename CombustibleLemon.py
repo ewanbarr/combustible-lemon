@@ -5,6 +5,7 @@ import warnings
 import time
 import MySQLdb as sql
 import sqlite3 
+import tempfile
 import numpy as np
 import Tkinter as tk
 import tkFont
@@ -511,6 +512,7 @@ class GUIViewerBase(object):
         self.root = tk.Toplevel()
         self.ind = None
         self.known_pulsars_window = None
+        self.gif_temp = None
         self.master_frame = tk.Frame(self.root)
         self.master_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         self.options_frame = tk.Frame(self.master_frame)
@@ -550,13 +552,24 @@ class GUIViewerBase(object):
         datum = self.parent.data_manager.cdata[self.ind]
         gif = "%s.gif" % datum["PFD_file"]
         if not os.path.isfile(gif):
+            print "Getting new gif path"
+            self.gif_temp = tempfile.NamedTemporaryFile(
+                prefix="combustible-lemon-",
+                suffix=".gif")
+            gif = self.gif_temp.name
             ps_file = "%s.ps" % datum["PFD_file"]
             ps_to_gif(ps_file,gif)
         return gif
 
+    def _del_gif_path(self):
+        if self.gif_temp is not None:
+            print "Closing",self.gif_temp.name
+            self.gif_temp.close()
+        
     def display(self):
         gif = self._get_gif_path()
         im = Image.open(gif).rotate(-90)
+        self._del_gif_path()
         self.tempim = ImageTk.PhotoImage(im)
         self.gif_label = tk.Label(self.image_frame,image=self.tempim)
         self.gif_label.pack(fill=tk.BOTH, expand=1)
@@ -667,6 +680,7 @@ class GUIViewerMulti(GUIViewerBase):
         self.selection_listbox.activate(self._position)
         gif = self._get_gif_path()
         im = Image.open(gif).rotate(-90)
+        self._del_gif_path()
         self.tempim = ImageTk.PhotoImage(im)
         self.gif_label.configure(image=self.tempim)
         self.selection_listbox.selection_clear(0,self.size)
@@ -902,7 +916,7 @@ class DataManager(object):
         self.odata[field][odata_inds] = val
 
 def ps_to_gif(infile,outfile):
-    os.system("convert -density 80 %s -trim -flatten -rotate 90 %s"%(infile,outfile))
+    os.system("convert -density 80 %s -trim -flatten %s"%(infile,outfile))
 
 def parse_bestprof(filename):
     f = open(filename,"r")
@@ -939,8 +953,6 @@ def parse_bestprof(filename):
                 value = "30.0"
                     
         info[key]=value
-    print info
-    print
     return info
         
 def parse_pfd(filename):
