@@ -577,7 +577,7 @@ class GUIViewerBase(object):
         known_db.execute_query(query)
         pulsars = known_db.get_output() 
         if pulsars is None:
-            tkMessageBox.showinfo("Known pulsar finder","No nearby pulsars")
+            tkMessageBox.showinfo("Known pulsar finder","No similar pulsars")
         else:
             self.known_pulsars_window = KnownPulsarDisplay(pulsars,cand)
 
@@ -585,7 +585,7 @@ class KnownPulsarDisplay(object):
     def __init__(self,pulsars,cand):
         self.cand = cand
         self.root = tk.Toplevel()
-        tk.Label(self.root,text = "%d nearby pulsars found"%(pulsars.size),
+        tk.Label(self.root,text = "%d similar pulsars found"%(pulsars.size),
                  pady=6,padx=2).pack(side=tk.TOP,fill=tk.X,expand=1,anchor=tk.W)
         self.close = tk.Button(self.root,text="Close",command=self.root.destroy)
         self.close.pack(side=tk.BOTTOM,expand=1)
@@ -598,7 +598,8 @@ class KnownPulsarDisplay(object):
             yscrollcommand=self.scrollbar.set,
             selectbackground="darkblue",
             selectforeground="gray90",
-            width=70)
+            width=70,
+            **DEFAULT_PALETTE)
         self.listbox.pack(side=tk.LEFT,fill=tk.BOTH,expand=1)
         self.scrollbar.config(command=self.listbox.yview)
         self.scrollbar.pack(side=tk.RIGHT,fill=tk.Y)
@@ -608,7 +609,7 @@ class KnownPulsarDisplay(object):
     def _details(self,pulsar):
         detail = "Name: %s    Period (s): %.8f    DM: %.1f    P/P_known: %.5f"%(
             pulsar["PSRJ"],pulsar["P0"],pulsar["DM"],
-            cand["P_bary (ms)"]/pulsar["P0"])
+            self.cand["P_bary (ms)"]/(1000.*pulsar["P0"]))
         return detail
 
     def _get_offset(self,pulsar):
@@ -835,18 +836,19 @@ class KnownPulsarFinder(BaseDBManager):
         contition = "(%s > %f AND %s < %f)"%(key,lower,key,upper)
         return contition
 
-    def build_query(self,cand,radius=5):
+    def build_query(self,cand):
         conditions = []
-        period = cand["P_bary_opt"]
-        ptolerance = period*0.01
-        #conditions.append(self._form_condition("GL",cand["GLong"],radius))
-        #conditions.append(self._form_condition("GB",cand["GLat"],radius))
-        conditions.append(self._form_condition("P0",cand["P_bary (ms)"],ptolerance))
-        conditions.append(self._form_condition("P0",0.5*cand["P_bary (ms)"],ptolerance))
-        conditions.append(self._form_condition("P0",2.0*cand["P_bary (ms)"],ptolerance))
-        conditions.append(self._form_condition("P0",4.0*cand["P_bary (ms)"],ptolerance))
+        period = cand["P_bary (ms)"]/1000.
+        ptolerance = period*0.001
+        conditions.append(self._form_condition("P0",period,ptolerance))
+        conditions.append(self._form_condition("P0",0.5*period,0.5*ptolerance))
+        conditions.append(self._form_condition("P0",2.0*period,2.0*ptolerance))
+        conditions.append(self._form_condition("P0",4.0*period,4.0*ptolerance))
         conditions_str = " OR ".join(conditions)
-        query = "SELECT * FROM PSRs WHERE %s;"%(conditions_str)
+        dm = cand["Best DM"]
+        dmtolerance = max(10.0,dm*0.15)
+        dm_condition = self._form_condition("DM",dm,dmtolerance)
+        query = "SELECT * FROM PSRs WHERE (%s) AND %s;"%(conditions_str,dm_condition)
         return query
 
     def execute_insert(self):
