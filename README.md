@@ -25,7 +25,7 @@ As the Python's main image library, PIL, cannot handle PRESTO format .ps files, 
 Guide
 -----
 
-Start up the plotter using `python combustible-lemon.py`
+Start up the plotter using `python combustiblelemon.py`
 
 You should see something like this:
 

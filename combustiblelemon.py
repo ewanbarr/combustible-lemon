@@ -97,6 +97,7 @@ MODE_TO_TYPE = {
 #---------Known Pulsar DB---------#
 #as there is no position information in the bestprof file.
 #we search based on period and DM (no harmonic matching)
+#positions could be added by prasing out info from the pfd 
 
 def find_known_pulsar_db():
     guess = "known_pulsars.sql"
@@ -746,7 +747,7 @@ class BaseDBManager(object):
             self.connection.close()
     
     def make_connection(func,*args,**kwargs):
-        """Decorator to make data base connections."""
+        """Decorator to make database connections."""
         def wrapped(self,*args,**kwargs):
             try:
                 self.connection = self.connect()
