@@ -17,7 +17,7 @@ No installation required, however if you wish to run the known pulsar checker th
 The basics
 ----------
 
-combustible-lemon (CL) is a light-weight plotting interface for output of the PRESTO pulsar searching package. It works by traversing given directories and collecting information from the .bestprof files for each candidate (assuming a corresponding .pfd and .ps file exist). This information is then stored in a numpy record array for plotting. CL allows users to quickly visualise the contents of a set of PRESTO folds and interactively select folds to be viewed.
+combustible-lemon (CL) is a light-weight, easily customised (both stylistically and functionally) plotting interface for output of the PRESTO pulsar searching package. It works by traversing given directories and collecting information from the .bestprof files for each candidate (assuming a corresponding .pfd and .ps file exist). This information is then stored in a numpy record array for plotting. CL allows users to quickly visualise the contents of a set of PRESTO folds and interactively select folds to be viewed.
 
 As the Python's main image library, PIL, cannot handle PRESTO format .ps files, the files are converted to gifs using Image Magick's `convert` command-line tool. The file is stored in /tmp/ until it is loaded to the viewer, meaning that only read permisions are required to use the plotter. 
 
@@ -93,8 +93,5 @@ Candidates can also be selected from the list box on the left hand side. The sam
 
  * `next` -- "right" and "down"
  * `previous` -- "left" and "up"
-
- 
-
 
 
