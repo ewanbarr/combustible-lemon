@@ -21,7 +21,7 @@ Guide
 
  2. You should see something like this:
 
-![alt text](https://github.com/ewanbarr/combustible-lemon/images/base_window.png "Main CL window")
+ ![alt text](https://github.com/ewanbarr/combustible-lemon/images/base_window.png "Main CL window")
  
 
 
