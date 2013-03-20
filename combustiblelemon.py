@@ -9,6 +9,7 @@ import glob
 import warnings
 import sqlite3 
 import tempfile
+import struct
 import numpy as np
 import Tkinter as tk
 import tkMessageBox
