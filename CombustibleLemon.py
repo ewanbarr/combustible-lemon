@@ -92,9 +92,8 @@ MODE_TO_TYPE = {
     }
 
 #---------Known Pulsar DB---------#
-#currently disabled as there is no position information 
-#in the bestprof file.
-#could be implemented with the pfd reader and RA,DEC strings  
+#as there is no position information in the bestprof file.
+#we search based on period and DM (no harmonic matching)
 
 def find_known_pulsar_db():
     guess = "known_pulsars.sql"
@@ -115,7 +114,7 @@ def find_known_pulsar_db():
         return path
 
 PSRSQL_DB_ENV = "CL_KNOWN_PULSARS"
-PSRSQL_DB = False 
+PSRSQL_DB = find_known_pulsar_db()
 
 #---------Plotting constants------#
 DEFAULT_XAXIS   = "P_bary (ms)"
@@ -607,12 +606,11 @@ class KnownPulsarDisplay(object):
             self.listbox.insert(tk.END,self._details(pulsar))
 
     def _details(self,pulsar):
-        print "Cand GL,GB:",self.cand["GLong"],self.cand["GLat"]
-        detail = "Name: %s    Period (s): %.8f    DM: %.1f    Offset (deg): %.5f"%(
+        detail = "Name: %s    Period (s): %.8f    DM: %.1f    P/P_known: %.5f"%(
             pulsar["PSRJ"],pulsar["P0"],pulsar["DM"],
-            self._get_offset(pulsar))
+            cand["P_bary (ms)"]/pulsar["P0"])
         return detail
-        
+
     def _get_offset(self,pulsar):
         gl_offset = self.cand["GLong"]-pulsar["GL"]
         gb_offset = self.cand["GLat"]-pulsar["GB"]
@@ -834,16 +832,20 @@ class KnownPulsarFinder(BaseDBManager):
     def _form_condition(self,key,value,tolerance):
         upper = value+tolerance
         lower = value-tolerance
-        contition = "%s > %f AND %s < %f"%(key,lower,key,upper)
+        contition = "(%s > %f AND %s < %f)"%(key,lower,key,upper)
         return contition
 
     def build_query(self,cand,radius=5):
         conditions = []
-        #period = cand["P_bary_opt"]
-        #ptolerance = period*0.01
-        conditions.append(self._form_condition("GL",cand["GLong"],radius))
-        conditions.append(self._form_condition("GB",cand["GLat"],radius))
-        conditions_str = " AND ".join(conditions)
+        period = cand["P_bary_opt"]
+        ptolerance = period*0.01
+        #conditions.append(self._form_condition("GL",cand["GLong"],radius))
+        #conditions.append(self._form_condition("GB",cand["GLat"],radius))
+        conditions.append(self._form_condition("P0",cand["P_bary (ms)"],ptolerance))
+        conditions.append(self._form_condition("P0",0.5*cand["P_bary (ms)"],ptolerance))
+        conditions.append(self._form_condition("P0",2.0*cand["P_bary (ms)"],ptolerance))
+        conditions.append(self._form_condition("P0",4.0*cand["P_bary (ms)"],ptolerance))
+        conditions_str = " OR ".join(conditions)
         query = "SELECT * FROM PSRs WHERE %s;"%(conditions_str)
         return query
 
