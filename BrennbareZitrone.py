@@ -1,15 +1,13 @@
 import os
 import sys
-import glob
 import warnings
 import time
+import MySQLdb as sql
 import sqlite3 
-import tempfile
 import numpy as np
 import Tkinter as tk
 import tkFont
 import tkMessageBox
-import tkFileDialog
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from getpass import getuser
@@ -18,25 +16,17 @@ from matplotlib.widgets import Lasso
 from PIL import ImageTk,Image
 import scipy.spatial as spatial
 
-#---------Usable colors--------------#
-# These colors are implemented in both matplotlib and tkinter
-"""
-gold,yellow,pink,tomato,aquamarine,orange,cyan,gray,goldenrod,turquoise,
-lavender,maroon,thistle,navy,blue,linen,snow,red,bisque,khaki,salmon,
-gainsboro,coral,purple,azure
-"""
-
 #---------type definitions-----------#
 
 BASE = {
-    "colors":("blue","white"),
+    "colors":("blue","black"),
     "state":"base",
     "repr":"Base",
     "db_value":np.nan
     }
 
 VIEWED = {
-    "colors":("purple","white"),
+    "colors":("magenta","black"),
     "state":"viewed",
     "repr":"Viewed",
     "db_value":4.0
@@ -85,18 +75,28 @@ TYPES = [BASE,
          CLASS2,
          KNOWN]
 
-STATE_TO_TYPE = {TYPE["state"]:TYPE for TYPE in TYPES}
-
 MODE_TO_TYPE = {
     "rfi":RFI,
     "highlight":HIGHLIGHT,
     "base":BASE
     }
 
-#---------Known Pulsar DB---------#
-#as there is no position information in the bestprof file.
-#we search based on period and DM (no harmonic matching)
+#---------DB constants------------#        
+USER       = getuser()
+DBHOST     = ""
+DBNAME     = ""
+DBUSER     = ""
+DBPASSWD   = ""
+BASE_QUERY = ("SELECT * FROM Results " 
+              "LEFT JOIN Observations ON (Results.OID=Observations.OID) " 
+              "LEFT JOIN Beams ON (Results.BID=Beams.BID) "
+              "LEFT OUTER JOIN Classification ON (Results.RID=Classification.RID)")
+BASE_INSERT = "REPLACE INTO Classification (User,RID,Class) VALUES"
+               
+DEFAULT_CONDITIONS = "PEACE_score > -12 AND Sigma_opt > 7.0 AND DM_opt > 2.0"#"PEACE_score > -12 AND Sigma_opt > 5.0 AND DM_opt > 2.0"
+DEFAULT_LIMIT      = "50000"#"300" 
 
+#---------Known Pulsar DB---------#
 def find_known_pulsar_db():
     guess = "known_pulsars.sql"
     path = None
@@ -115,44 +115,24 @@ def find_known_pulsar_db():
     else:
         return path
 
-PSRSQL_DB_ENV = "CL_KNOWN_PULSARS"
+PSRSQL_DB_ENV = "DP2_KNOWN_PULSARS"
 PSRSQL_DB = find_known_pulsar_db()
 
 #---------Plotting constants------#
-DEFAULT_XAXIS   = "P_bary (ms)"
-DEFAULT_YAXIS   = "Sigma"
-BESTPROF_DTYPE  = [
-    ('Best DM',"float32"),('Epoch_bary',"float32"),
-    ('Epoch_topo',"float32"),("P''_bary (s/s^2)","float32"),
-    ("P''_topo (s/s^2)","float32"),("P'_bary (s/s)","float32"),
-    ("P'_topo (s/s)","float32"),('P_bary (ms)',"float32"),
-    ('P_topo (ms)',"float32"),('Sigma',"float32"),
-    ('Reduced chi-sqr',"float32"),('PFD_file',"|S400")
+DEFAULT_XAXIS   = "P_bary_opt"
+DEFAULT_YAXIS   = "PEACE_score"
+PLOTABLE_FIELDS = [
+    'P_disc','F_disc','P_bary_opt','F_opt','Pd_bary_opt',
+    'Pdd_bary_opt','P_topo_opt','Pd_topo_opt','Pdd_topo_opt',
+    'DM_disc','DM_opt','Epoch_topo','Epoch_bary','Red_chi2',
+    'Sigma_disc','Sigma_opt','Noise_prob','SNR','z','r','Power_coh',
+    'Power_incoh','Nhits','Nharms','Qual_strength','Qual_width',
+    'Qual_width_tree','Qual_persist','Qual_persist_tree','Qual_band',
+    'Qual_band_tree','Qual_dm_shape','Qual_dm_smear','Qual_score',
+    'Qual_score_tree','PEACE_score','Az','El','RA_deg','Decl_deg',
+    'GLong','GLat'
     ]
-PLOTABLE_FIELDS = [key for key,dtype in BESTPROF_DTYPE if dtype=="float32"]
 PLOT_SIZE = (8,5)
-MPL_STYLE = {
-    "text.color":"lightblue",
-    "axes.labelcolor":"lightblue",
-    "axes.edgecolor":"black",
-    "axes.facecolor":"0.4",
-    "xtick.color": "lightblue",
-    "ytick.color": "lightblue",
-    "figure.facecolor":"black",
-    "figure.edgecolor":"black",
-    "text.usetex":False
-}
-mpl.rcParams.update(MPL_STYLE)
-
-#----------Style options---------#
-DEFAULT_PALETTE = {"foreground":"lightblue","background":"black"}
-DEFAULT_STYLE_1 = {"foreground":"black","background":"lightblue"}
-DEFAULT_STYLE_2 = {"foreground":"gray90","background":"darkgreen"}
-DEFAULT_STYLE_3 = {"foreground":"gray90","background":"darkred"}
-
-#-----------Misc.-------------#
-DEFAULT_DIRECTORY = os.getcwd()
-
 
 class NavSelectToolbar(NavigationToolbar2TkAgg): 
     def __init__(self, canvas,root,parent):
@@ -161,10 +141,12 @@ class NavSelectToolbar(NavigationToolbar2TkAgg):
         self.parent = parent
         font = tkFont.Font(weight="bold",underline=True)
         NavigationToolbar2TkAgg.__init__(self, canvas,root)
+
+        style = {"bg":"darkblue","fg":"gray90"}
         self.lasso_button = self._custom_button(text="lasso",command=lambda: self.lasso(
-                lambda inds: self.parent.multi_select_callback(inds),"lasso"),**DEFAULT_STYLE_1)
+                lambda inds: self.parent.multi_select_callback(inds),"lasso"),**style)
         self.pick_button = self._custom_button(text="select",command=lambda: self.picker(
-                lambda ind: self.parent.single_select_callback(ind),"select"),**DEFAULT_STYLE_1)
+                lambda ind: self.parent.single_select_callback(ind),"select"),**style )
 
     def _custom_button(self, text, command, **kwargs):
         button = tk.Button(master=self, text=text, padx=2, pady=2, command=command, **kwargs)
@@ -223,7 +205,7 @@ class NavSelectToolbar(NavigationToolbar2TkAgg):
 class GUIMain(object):
     def __init__(self,root):
         self.root = root
-        self.root.wm_title("Combustible Lemon (PRESTO version)")
+        self.root.wm_title("HTRU-North candidate viewer (DP2)")
         self.top_frame = tk.Frame(self.root)
         self.top_frame.pack(side=tk.TOP) 
         self.bottom_frame = tk.Frame(self.root)
@@ -234,12 +216,12 @@ class GUIMain(object):
         self.plot_frame.pack(side=tk.LEFT)
         self.options_frame = tk.Frame(self.top_frame) 
         self.options_frame.pack(side=tk.LEFT)
-        self.cands_options_frame = tk.Frame(self.bottom_frame)
-        self.cands_options_frame.pack(side=tk.LEFT,fill=tk.BOTH)
+        self.db_options_frame = tk.Frame(self.bottom_frame)
+        self.db_options_frame.pack(side=tk.LEFT,fill=tk.BOTH)
         self.plotter    = GUIPlotter(self.plot_frame,self)
         self.options    = GUIOptions(self.options_frame,self)
         self.stats      = GUIStats(self.stats_frame,self)
-        self.cand_opts  = GUIOptionsCands(self.cands_options_frame,self)
+        self.db_options = GUIOptionsDB(self.db_options_frame,self)
 
 class GUIPlotter(object):
     def __init__(self,root,parent):
@@ -345,7 +327,7 @@ class GUIOptions(object):
         self.view_toggle_frame = tk.Frame(self.root,pady=20)
         self.view_toggle_frame.pack(side=tk.TOP,fill=tk.X,expand=1)
         
-        self.misc_opts_frame = tk.Frame(self.root,pady=10)
+        self.misc_opts_frame = tk.Frame(self.root,pady=20)
         self.misc_opts_frame.pack(side=tk.TOP,fill=tk.X,expand=1)
                 
         self.xaxis_frame = tk.Frame(self.ax_opts_frame)
@@ -365,15 +347,10 @@ class GUIOptions(object):
         self.yaxis_selector,self.yaxis_scale_check = self._create_axis_opts(
             self.yaxis_frame,"Y-Axis:",self.yaxis_key_var,self.yaxis_scale_var)
         self.replot_button = tk.Button(
-            self.ax_opts_frame,text="Replot",command=self.parent.plotter.plot,
-            padx=2, pady=6, **DEFAULT_STYLE_2)
+            self.ax_opts_frame,text="Replot",command=self.parent.plotter.plot,padx=2,pady=2)
         self.replot_button.pack(side=tk.BOTTOM,fill=tk.X,expand=1)
-        tk.Label(self.mode_select_frame,text="Mode:"
-                 ).pack(side=tk.LEFT,fill=tk.X,expand=1)
-        tk.Label(self.view_toggle_frame,text="Toggle types:",pady=4
-                 ).pack(side=tk.TOP,fill=tk.X,expand=1)
         self.mode_var = tk.StringVar()
-        self.mode_var.set("viewed")
+        self.mode_var.set("view")
         self._add_select_mode("RFI",RFI) 
         self._add_select_mode("Mark",HIGHLIGHT)
         self._add_select_mode("Reset",BASE)
@@ -383,44 +360,39 @@ class GUIOptions(object):
             self._add_toggle_mode(self.view_toggle_frame,type_dict)
 
         self.update_button = self._custom_button(
-            self.misc_opts_frame,"Print Class 1/2",
-            self.update_db,**DEFAULT_STYLE_1)
+            self.misc_opts_frame,"Update database",
+            self.update_db)
 
         self.dump_button = self._custom_button(
             self.misc_opts_frame,"Dump plot data",
-            self.dump,**DEFAULT_STYLE_1)
+            self.dump)
         
         self.quit_button = self._custom_button(
-            self.misc_opts_frame,"Quit",
-            self.quit,**DEFAULT_STYLE_3)
+            self.misc_opts_frame,"Quit DP2",
+            self.quit)
 
     def dump(self):
         if self.parent.plotter.data_manager is None:return
-        dump_name = tkFileDialog.asksaveasfilename()
-        if dump_name:
-            np.save(dump_name,self.parent.plotter.data_manager)
+        dump_name = time.strftime("%Y%m%d-%H%M-DP2.npy")
+        np.save(dump_name,self.parent.plotter.data_manager)
+        tkMessageBox.showinfo("DP2","%s\nwritten to disk" % dump_name)
         
     def update_db(self):
         data_manager = self.parent.plotter.data_manager
         if data_manager is None:return       
-        cdata = data_manager.cdata
-        class1_id = np.where(cdata["state"]=="class1")
-        class2_id = np.where(cdata["state"]=="class2")
-        print "######## Class 1 #########"
-        for row in cdata[class1_id]:
-            print row["PFD_file"]
-        print "######## Class 2 #########"
-        for row in cdata[class2_id]:
-            print row["PFD_file"]
+        if tkMessageBox.askokcancel("DP2","Update database?"):
+            db_manager = DBManager()
+            built_insert = db_manager.build_insert(data_manager.odata)
+            db_manager.execute_insert(built_insert)
 
     def quit(self):
         msg = "Quitting:\nUnsaved progress will be lost.\nDo you wish to Continue?"
-        if tkMessageBox.askokcancel("Combustible Lemon",msg):
+        if tkMessageBox.askokcancel("DP2",msg):
             self.parent.root.destroy()
 
     def _custom_button(self,root,text,command,**kwargs):
         button = tk.Button(root, text=text,
-            command=command,padx=2, pady=2,height=1, width=15,**kwargs)
+            command=command,padx=2, pady=6,height=1, width=15,**kwargs)
         button.pack(side=tk.TOP,fill=None,expand=1)
         return button
 
@@ -446,25 +418,25 @@ class GUIOptions(object):
         self.toggle_buttons[name]["variable"] = var
 
     def _add_select_mode(self,name,state):
-        val  = state["state"]
+        val = state["state"]
         tk.Radiobutton(
             self.mode_select_frame,text=name,
             variable=self.mode_var,value=val,indicatoron=False,
-            padx = 2, pady = 6,selectcolor="gray50",**DEFAULT_STYLE_1
+            padx = 2, pady = 6
             ).pack(side=tk.LEFT,fill=tk.X,expand=1)
 
     def _create_axis_opts(self,frame,name,key_var,scale_var):
         tk.Label(frame,text=name,padx=8,pady=2).pack(side=tk.LEFT,expand=1)
         selector  = tk.OptionMenu(frame,key_var,*PLOTABLE_FIELDS)
         selector.pack(side=tk.LEFT,expand=1)
-        selector.configure(width=15,**DEFAULT_STYLE_1)
+        selector.configure(width=15)
         check_button = tk.Checkbutton(
             frame,text="Log",variable=scale_var,
-            onvalue='log',offvalue='linear',selectcolor="black")
+            onvalue='log',offvalue='linear')
         check_button.pack(side=tk.LEFT,expand=1)
         return selector,check_button
 
-class GUIOptionsCands(object):
+class GUIOptionsDB(object):
     def __init__(self,root,parent):
         self.root = root
         self.parent = parent
@@ -472,43 +444,48 @@ class GUIOptionsCands(object):
         self.top_frame.pack(side=tk.TOP,anchor=tk.W)
         self.bottom_frame = tk.Frame(self.root)
         self.bottom_frame.pack(side=tk.BOTTOM,fill=tk.BOTH,expand=1)
-        tk.Label(self.top_frame,text="Directory:",padx=8,pady=2,height=1).pack(side=tk.LEFT,anchor=tk.W)
-        self.directory_entry = tk.Entry(self.top_frame,width=90,bg="lightblue",
-                                    fg="black",highlightcolor="lightblue",insertbackground="black",
-                                    highlightthickness=2)
-        self.directory_entry.pack(side=tk.LEFT,fill=tk.BOTH,expand=1,anchor=tk.W)
-        self.directory_entry.insert(0,DEFAULT_DIRECTORY)
-        tk.Button(self.top_frame,text="Browse",command=self.launch_dir_finder,**DEFAULT_STYLE_1
+        font = tkFont.Font(weight="bold")
+        tk.Label(self.top_frame,text="Conditions:",padx=8,pady=2,height=1,font=font).pack(side=tk.LEFT,anchor=tk.W)
+        self.query_entry = tk.Entry(self.top_frame,width=90,bg="white",
+                                    fg="black",highlightcolor="black",
+                                    highlightthickness=4)
+        self.query_entry.pack(side=tk.LEFT,fill=tk.BOTH,expand=1,anchor=tk.W)
+        tk.Button(self.top_frame,text="Clear",command=lambda:self.query_entry.delete(0,tk.END)
                   ).pack(side=tk.LEFT,fill=tk.BOTH,expand=1,anchor=tk.W)
-        self.submit_button = tk.Button(self.bottom_frame,text="Load candidates",width=60,
-                                       command=self.send_query,**DEFAULT_STYLE_2)
-        self.submit_button.pack(side=tk.BOTTOM,expand=1,anchor=tk.CENTER)
-        self.walk_mode = tk.StringVar()
-        self.walk_mode.set("off")
-        tk.Checkbutton(self.top_frame, text="Follow tree",
-                       variable=self.walk_mode, onvalue="on",
-                       offvalue="off",padx=6,pady=2,selectcolor="black"
-                       ).pack(side=tk.LEFT,fill=tk.BOTH,expand=1)
+        
+        tk.Label(self.top_frame,text="Limit:",padx=8,pady=2,height=1,font=font).pack(side=tk.LEFT,anchor=tk.W)
+        self.limit_entry = tk.Entry(self.top_frame,width=10,bg="white",
+                                    fg="black",highlightcolor="black",
+                                    highlightthickness=4)
+        self.limit_entry.pack(side=tk.LEFT,expand=1,anchor=tk.W)
+        self.submit_button = tk.Button(self.bottom_frame,text="Submit query",command=self.send_query)
+        self.submit_button.pack(side=tk.RIGHT,fill=tk.BOTH,expand=1,anchor=tk.E)
+        self.mode = tk.StringVar()
+        self.mode.set("unclassified")
+        tk.Radiobutton(self.bottom_frame,text="Any",variable=self.mode,value="any"
+                       ).pack(side=tk.RIGHT,fill=tk.BOTH,expand=1,anchor=tk.E)
+        tk.Radiobutton(self.bottom_frame,text="Unclassified",variable=self.mode,value="unclassified"
+                       ).pack(side=tk.RIGHT,fill=tk.BOTH,expand=1,anchor=tk.E)
+        self.query_entry.insert(0,DEFAULT_CONDITIONS)
+        self.limit_entry.insert(0,DEFAULT_LIMIT)
         
     def send_query(self):
-        directory = self.directory_entry.get()
-        finder = CandidateFinder()
-        mode = self.walk_mode.get()
-        if mode == "on":
-            finder.get_from_directories(directory)
+        limit = self.limit_entry.get()
+        if not limit.isdigit():
+            tkMessageBox.showerror("Query error","Given limit is not a numeric value")
+            return
+        limit = int(limit)
+        query = self.query_entry.get()
+        mode  = self.mode.get()
+        db_manager = DBManager()
+        built_query = db_manager.build_query(query,view_mode=mode,limit=limit)
+        db_manager.execute_query(built_query)
+        output = db_manager.get_output()
+        if output is None:
+            tkMessageBox.showwarning("DP2","No results returned from query.")
         else:
-            finder.get_from_directory(directory)
-        if not finder.filenames:
-            tkMessageBox.showwarning("Combustible Lemon","No files found in specified directory.")
-        else:
-            output = finder.parse_all()
             data_manager = DataManager(output)
             self.parent.plotter.set_data_manager(data_manager)
-    
-    def launch_dir_finder(self):
-        directory = tkFileDialog.askdirectory()
-        self.directory_entry.delete(0,tk.END)
-        self.directory_entry.insert(0,directory)
 
 class GUIStats(object):
     def __init__(self,root,parent):
@@ -521,7 +498,6 @@ class GUIViewerBase(object):
         self.root = tk.Toplevel()
         self.ind = None
         self.known_pulsars_window = None
-        self.gif_temp = None
         self.master_frame = tk.Frame(self.root)
         self.master_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         self.options_frame = tk.Frame(self.master_frame)
@@ -529,16 +505,16 @@ class GUIViewerBase(object):
         self.image_frame = tk.Frame(self.master_frame)
         self.image_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=1)
         style = {"fg":"gray90","bg":"darkblue"}
-        self._custom_button("Class 1",lambda: self.set_state_wrapper(CLASS1),tk.TOP,**DEFAULT_STYLE_1)
-        self._custom_button("Class 2",lambda: self.set_state_wrapper(CLASS2),tk.TOP,**DEFAULT_STYLE_1)
-        self._custom_button("RFI",lambda: self.set_state_wrapper(RFI),tk.TOP,**DEFAULT_STYLE_1)
-        self._custom_button("Known",lambda: self.set_state_wrapper(KNOWN),tk.TOP,**DEFAULT_STYLE_1)
-        self._custom_button("No class",lambda: self.set_state_wrapper(BASE),tk.TOP,**DEFAULT_STYLE_1)
+        self._custom_button("Class 1",lambda: self.set_state_wrapper(CLASS1),tk.TOP,**style)
+        self._custom_button("Class 2",lambda: self.set_state_wrapper(CLASS2),tk.TOP,**style)
+        self._custom_button("RFI",lambda: self.set_state_wrapper(RFI),tk.TOP,**style)
+        self._custom_button("Known",lambda: self.set_state_wrapper(KNOWN),tk.TOP,**style)
+        self._custom_button("No class",lambda: self.set_state_wrapper(BASE),tk.TOP,**style)
         if PSRSQL_DB:
             tk.Button(master=self.options_frame, text="Is known?",
                       padx=6,pady=10, command=self.find_nearby_knowns,
                       fg="gray90",bg="darkgreen").pack(side=tk.TOP,fill=tk.X)
-        self._custom_button("Close",self.root.destroy,tk.BOTTOM,**DEFAULT_STYLE_3)
+        self._custom_button("Close",self.root.destroy,tk.BOTTOM,fg="gray90",bg="darkred")
         self.key_press_callback_dict = {
             'r':lambda:self.set_state_wrapper(RFI),
             '1':lambda:self.set_state_wrapper(CLASS1),
@@ -548,6 +524,8 @@ class GUIViewerBase(object):
             }
         self.root.bind("<Key>", self.key_press_callback)
         
+        
+
     def _custom_button(self,text,command,side,**kwargs):
         button = tk.Button(master=self.options_frame, text=text, 
                       padx=6, pady=6, command=command,**kwargs)
@@ -559,26 +537,13 @@ class GUIViewerBase(object):
 
     def _get_gif_path(self):
         datum = self.parent.data_manager.cdata[self.ind]
-        gif = "%s.gif" % datum["PFD_file"]
-        if not os.path.isfile(gif):
-            print "Getting new gif path"
-            self.gif_temp = tempfile.NamedTemporaryFile(
-                prefix="combustible-lemon-",
-                suffix=".gif")
-            gif = self.gif_temp.name
-            ps_file = "%s.ps" % datum["PFD_file"]
-            ps_to_gif(ps_file,gif)
-        return gif
+        path  = datum["Path"]
+        basename = os.path.join(path,os.path.splitext(datum["PS_file"])[0])
+        return basename+".gif"
 
-    def _del_gif_path(self):
-        if self.gif_temp is not None:
-            print "Closing",self.gif_temp.name
-            self.gif_temp.close()
-        
     def display(self):
         gif = self._get_gif_path()
         im = Image.open(gif).rotate(-90)
-        self._del_gif_path()
         self.tempim = ImageTk.PhotoImage(im)
         self.gif_label = tk.Label(self.image_frame,image=self.tempim)
         self.gif_label.pack(fill=tk.BOTH, expand=1)
@@ -601,7 +566,7 @@ class GUIViewerBase(object):
         known_db.execute_query(query)
         pulsars = known_db.get_output() 
         if pulsars is None:
-            tkMessageBox.showinfo("Known pulsar finder","No similar pulsars")
+            tkMessageBox.showinfo("Known pulsar finder","No nearby pulsars")
         else:
             self.known_pulsars_window = KnownPulsarDisplay(pulsars,cand)
 
@@ -609,7 +574,7 @@ class KnownPulsarDisplay(object):
     def __init__(self,pulsars,cand):
         self.cand = cand
         self.root = tk.Toplevel()
-        tk.Label(self.root,text = "%d similar pulsars found"%(pulsars.size),
+        tk.Label(self.root,text = "%d nearby pulsars found"%(pulsars.size),
                  pady=6,padx=2).pack(side=tk.TOP,fill=tk.X,expand=1,anchor=tk.W)
         self.close = tk.Button(self.root,text="Close",command=self.root.destroy)
         self.close.pack(side=tk.BOTTOM,expand=1)
@@ -622,8 +587,7 @@ class KnownPulsarDisplay(object):
             yscrollcommand=self.scrollbar.set,
             selectbackground="darkblue",
             selectforeground="gray90",
-            width=70,
-            **DEFAULT_PALETTE)
+            width=70)
         self.listbox.pack(side=tk.LEFT,fill=tk.BOTH,expand=1)
         self.scrollbar.config(command=self.listbox.yview)
         self.scrollbar.pack(side=tk.RIGHT,fill=tk.Y)
@@ -631,11 +595,13 @@ class KnownPulsarDisplay(object):
             self.listbox.insert(tk.END,self._details(pulsar))
 
     def _details(self,pulsar):
-        detail = "Name: %s    Period (s): %.8f    DM: %.1f    P/P_known: %.5f"%(
+        
+        print "Cand GL,GB:",self.cand["GLong"],self.cand["GLat"]
+        detail = "Name: %s    Period (s): %.8f    DM: %.1f    Offset (deg): %.5f"%(
             pulsar["PSRJ"],pulsar["P0"],pulsar["DM"],
-            self.cand["P_bary (ms)"]/(1000.*pulsar["P0"]))
+            self._get_offset(pulsar))
         return detail
-
+        
     def _get_offset(self,pulsar):
         gl_offset = self.cand["GLong"]-pulsar["GL"]
         gb_offset = self.cand["GLat"]-pulsar["GB"]
@@ -655,13 +621,12 @@ class GUIViewerMulti(GUIViewerBase):
         self.ind = inds[0] 
         self.size = len(inds)
         self._position = 0
+        style = {"bg":"darkblue","fg":"gray75","padx":2,"pady":2}
         self.navigation_frame = tk.Frame(self.root)
         self.navigation_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=1)
-        self.next_button = tk.Button(self.navigation_frame,text="Next",
-                                     command=self.next,padx=2,pady=2,**DEFAULT_STYLE_1) 
+        self.next_button = tk.Button(self.navigation_frame,text="Next",command=self.next,**style) 
         self.next_button.pack(side=tk.RIGHT, fill=tk.BOTH, expand=1)
-        self.prev_button = tk.Button(self.navigation_frame,text="Previous",
-                                     command=self.previous,padx=2,pady=2,**DEFAULT_STYLE_1)
+        self.prev_button = tk.Button(self.navigation_frame,text="Previous",command=self.previous,**style)
         self.prev_button.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         self.selection_frame = tk.Frame(self.master_frame)
         self.selection_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
@@ -673,7 +638,7 @@ class GUIViewerMulti(GUIViewerBase):
             selectforeground="gray90",
             width=10)            
         self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
-        self._populate_listbox()
+        [self.selection_listbox.insert(tk.END,ii+1) for ii in range(self.size)]
         self.selection_listbox.selection_set(self._position,self._position)
         self.selection_listbox.bind('<<ListboxSelect>>', self.list_select)
         self.scrollbar.config(command=self.selection_listbox.yview)
@@ -684,21 +649,11 @@ class GUIViewerMulti(GUIViewerBase):
         self.selection_listbox.focus_set()
         self.display()
 
-    def _populate_listbox(self):
-        for ii,ind in enumerate(self.inds):
-            state = self.parent.data_manager.cdata[ind]["state"]
-            if state in ["viewed","base"]:
-                self.selection_listbox.insert(tk.END,ii+1)
-            else:
-                state = STATE_TO_TYPE[state]
-                self.selection_listbox.insert(tk.END,"%d  %s"%(ii+1,state["repr"])) 
-        
     def update(self):
         self.ind = self.inds[self._position]
         self.selection_listbox.activate(self._position)
         gif = self._get_gif_path()
         im = Image.open(gif).rotate(-90)
-        self._del_gif_path()
         self.tempim = ImageTk.PhotoImage(im)
         self.gif_label.configure(image=self.tempim)
         self.selection_listbox.selection_clear(0,self.size)
@@ -724,6 +679,7 @@ class GUIViewerMulti(GUIViewerBase):
             self.selection_listbox.yview_scroll(-1,"units")
             
     def set_state_wrapper(self,state):
+        print state
         if state["state"] in ["base","viewed"]:
             state_str = ""
         else:
@@ -808,54 +764,33 @@ class BaseDBManager(object):
         output = np.rec.fromrecords(output,names=names)
         return output
 
-class CandidateFinder(object):
+class DBManager(BaseDBManager):
     def __init__(self):
-        self.filenames = []
-        self.counter = None
+        super(DBManager,self).__init__()
 
-    def _is_valid(self,pfd):
-        ps_valid = os.path.isfile("%s.ps" % pfd)
-        bp_valid = os.path.isfile("%s.bestprof" % pfd)
-        return all((ps_valid,bp_valid))
+    def connect(self):
+        return sql.connect(host=DBHOST,db=DBNAME,user=DBUSER,passwd=DBPASSWD)
 
-    def get_from_directory(self,directory):
-        pfds = glob.glob("%s/*.pfd" % directory)
-        print "%s/*.pfd" % directory
-        if not pfds:
-            return None
-        for pfd in pfds:
-            if self._is_valid(pfd):
-                self.filenames.append(pfd)
-
-    def get_from_directories(self,directory):
-        counter = 0
-        print "Searching %s" % directory
-        rambler = os.walk(directory)
-        for path,dirnames,filenames in rambler:
-            for filename in filenames:
-                if filename.endswith(".pfd"):
-                    pfd = os.path.join(path,filename)
-                    if self._is_valid(pfd):
-                        self.filenames.append(pfd)
-                        counter+=1
-                        sys.stdout.write("Found %d files...\r"%counter)
-                        sys.stdout.flush()
-                
-    def parse_all(self):
-        filenames = list(set(self.filenames))
-        nfiles = len(filenames)
-        recarray = np.recarray(nfiles,dtype=BESTPROF_DTYPE)
-        print "Parsing %d .bestprof files..." % nfiles
-        for ii,filename in enumerate(filenames):
-            if ii%10 == 0:
-                sys.stdout.write("%.2f\r"%(100.*ii/nfiles))
-                sys.stdout.flush()
-            bestprof_file = "%s.bestprof" % filename
-            info = parse_bestprof(bestprof_file)
-            for key in PLOTABLE_FIELDS:
-                recarray[ii][key] = info[key]
-            recarray[ii]["PFD_file"] = filename
-        return recarray
+    def build_query(self,conditions,view_mode="unclassified",limit=None):
+        """Take a partial sql string and build a query."""
+        query = "%s WHERE %s"%(BASE_QUERY,conditions)
+        if view_mode == "unclassified":
+            query = "%s AND Class IS NULL"%(query)
+        if limit is not None:
+            query = "%s LIMIT %d"%(query,limit)
+        query+=";"
+        return query
+    
+    def build_insert(self,cdata):
+        """Build the Classification INSERT command.""" 
+        rows_to_insert = []
+        for row in cdata:
+            if not np.isnan(row["db_value"]):
+                rows_to_insert.append("(%r,%d,%.1f)"%(
+                        USER, row["RID"], row["db_value"]))
+        insert_str = ",".join(rows_to_insert)
+        insert = "%s %s;"%(BASE_INSERT,insert_str)
+        return insert
 
 class KnownPulsarFinder(BaseDBManager):
     def __init__(self):
@@ -867,22 +802,17 @@ class KnownPulsarFinder(BaseDBManager):
     def _form_condition(self,key,value,tolerance):
         upper = value+tolerance
         lower = value-tolerance
-        contition = "(%s > %f AND %s < %f)"%(key,lower,key,upper)
+        contition = "%s > %f AND %s < %f"%(key,lower,key,upper)
         return contition
 
-    def build_query(self,cand):
+    def build_query(self,cand,radius=5):
         conditions = []
-        period = cand["P_bary (ms)"]/1000.
-        ptolerance = period*0.001
-        conditions.append(self._form_condition("P0",period,ptolerance))
-        conditions.append(self._form_condition("P0",0.5*period,0.5*ptolerance))
-        conditions.append(self._form_condition("P0",2.0*period,2.0*ptolerance))
-        conditions.append(self._form_condition("P0",4.0*period,4.0*ptolerance))
-        conditions_str = " OR ".join(conditions)
-        dm = cand["Best DM"]
-        dmtolerance = max(10.0,dm*0.15)
-        dm_condition = self._form_condition("DM",dm,dmtolerance)
-        query = "SELECT * FROM PSRs WHERE (%s) AND %s;"%(conditions_str,dm_condition)
+        #period = cand["P_bary_opt"]
+        #ptolerance = period*0.01
+        conditions.append(self._form_condition("GL",cand["GLong"],radius))
+        conditions.append(self._form_condition("GB",cand["GLat"],radius))
+        conditions_str = " AND ".join(conditions)
+        query = "SELECT * FROM PSRs WHERE %s;"%(conditions_str)
         return query
 
     def execute_insert(self):
@@ -933,86 +863,10 @@ class DataManager(object):
         odata_inds = self.cdata[inds]["odata_id"] 
         self.odata[field][odata_inds] = val
 
-def ps_to_gif(infile,outfile):
-    os.system("convert -density 80 %s -trim -flatten %s"%(infile,outfile))
-
-def parse_bestprof(filename):
-    f = open(filename,"r")
-    lines = f.readlines()
-    f.close()
-    info = {} 
-    for ii,line in enumerate(lines):
-        if not line.startswith("# "):
-            continue
-        if line.startswith("# Prob(Noise)"):
-            line = line[2:].split("<")
-        else:
-            line = line[2:].split("=")
-            
-        key = line[0].strip()
-        value = line[1].strip()
-        
-        if "+/-" in value:
-            value = value.split("+/-")[0]
-            if "inf" in value:
-                value = "0.0"
-
-        if value == "N/A":
-            value = "0.0"
-
-        if "Epoch" in key:
-            key = key.split()[0]
-
-        if key == "Prob(Noise)":
-            key = "Sigma"
-            try:
-                value = value.split("(")[1].split()[0].strip("~")
-            except:
-                value = "30.0"
-                    
-        info[key]=value
-    return info
-        
-def parse_pfd(filename):
-    header_params = [
-        "ndms","nperiods","npdots","nsubs","nparts","proflen","nchans","pstep"
-        ,"pdstep","dmstep","ndmfact","npfact","filname","candname","telescope","plotdev"
-        ,"rastr","decstr","dt","tstart","tend","tepoch","bepoch","avgvoverc","lofreq"
-        ,"chan_wid","best_dm","topo_pow","topo_p1","topo_p2","topo_p3","bary_pow","bary_p1"
-        ,"bary_p2","bary_p3","fold_pow","fold_p1","fold_p2","fold_p3","orb_p","orb_e","orb_x"
-        ,"orb_w","orb_t","orb_pd","orb_wd"
-        ]
-    f = open(filename,"r")
-    values = {}
-    count = 0
-    for ii in range(12):
-        values[header_params[count]] = struct.unpack("I",f.read(4))[0]
-        count += 1
-    for ii in range(4):
-        val_len = struct.unpack("I",f.read(4))[0]
-        values[header_params[count]] = ''.join([char for char in struct.unpack("c"*val_len,f.read(val_len))])
-        count += 1
-    for ii in range(2):
-        values[header_params[count]] = ''.join([char for char in struct.unpack("c"*13,f.read(13))])
-        f.seek(3,1)
-        count += 1
-    for ii in range(9):
-        values[header_params[count]] = struct.unpack("d",f.read(8))[0]
-        count += 1
-    for ii in range(3):
-        values[header_params[count]] = struct.unpack("f",f.read(4))[0]
-        count += 1
-        f.seek(4,1)
-        for ii in range(3):
-            values[header_params[count]] = struct.unpack("d",f.read(8))[0]
-            count += 1
-    f.close()
-    return values
-
 def main():
     root = tk.Tk()
-    root.wm_title("Combustible Lemon (PRESTO version)")
-    root.tk_setPalette(**DEFAULT_PALETTE)
+    root.wm_title("HTRU-North candidate viewer (DP2)")
+    root.tk_setPalette(background='gray75', foreground='black')
     plotter = GUIMain(root)
     root.mainloop()
 
