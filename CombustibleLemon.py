@@ -85,6 +85,8 @@ TYPES = [BASE,
          CLASS2,
          KNOWN]
 
+STATE_TO_TYPE = {TYPE["state"]:TYPE for TYPE in TYPES}
+
 MODE_TO_TYPE = {
     "rfi":RFI,
     "highlight":HIGHLIGHT,
@@ -668,7 +670,7 @@ class GUIViewerMulti(GUIViewerBase):
             selectforeground="gray90",
             width=10)            
         self.selection_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
-        [self.selection_listbox.insert(tk.END,ii+1) for ii in range(self.size)]
+        self._populate_listbox()
         self.selection_listbox.selection_set(self._position,self._position)
         self.selection_listbox.bind('<<ListboxSelect>>', self.list_select)
         self.scrollbar.config(command=self.selection_listbox.yview)
@@ -679,6 +681,15 @@ class GUIViewerMulti(GUIViewerBase):
         self.selection_listbox.focus_set()
         self.display()
 
+    def _populate_listbox(self):
+        for ii,ind in enumerate(self.inds):
+            state = self.parent.data_manager.cdata[ind]["state"]
+            if state in ["viewed","base"]:
+                self.selection_listbox.insert(tk.END,ii+1)
+            else:
+                state = STATE_TO_TYPE[state]
+                self.selection_listbox.insert(tk.END,"%d  %s"%(ii+1,state["repr"])) 
+        
     def update(self):
         self.ind = self.inds[self._position]
         self.selection_listbox.activate(self._position)
