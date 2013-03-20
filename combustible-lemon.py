@@ -7,27 +7,24 @@ import os
 import sys
 import glob
 import warnings
-import time
 import sqlite3 
 import tempfile
 import numpy as np
 import Tkinter as tk
-import tkFont
 import tkMessageBox
 import tkFileDialog
 import matplotlib as mpl
-from getpass import getuser
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
 from matplotlib.widgets import Lasso
 from PIL import ImageTk,Image
-import scipy.spatial as spatial
 
 #---------Usable colors--------------#
 # These colors are implemented in both matplotlib and tkinter
+# This is not a complete list
 """
 gold,yellow,pink,tomato,aquamarine,orange,cyan,gray,goldenrod,turquoise,
 lavender,maroon,thistle,navy,blue,linen,snow,red,bisque,khaki,salmon,
-gainsboro,coral,purple,azure
+gainsboro,coral,purple,azure,white,black,green
 """
 
 #---------type definitions-----------#
@@ -163,7 +160,6 @@ class NavSelectToolbar(NavigationToolbar2TkAgg):
         self.canvas = canvas
         self.root   = root
         self.parent = parent
-        font = tkFont.Font(weight="bold",underline=True)
         NavigationToolbar2TkAgg.__init__(self, canvas,root)
         self.lasso_button = self._custom_button(text="lasso",command=lambda: self.lasso(
                 lambda inds: self.parent.multi_select_callback(inds),"lasso"),**DEFAULT_STYLE_1)
@@ -227,7 +223,7 @@ class NavSelectToolbar(NavigationToolbar2TkAgg):
 class GUIMain(object):
     def __init__(self,root):
         self.root = root
-        self.root.wm_title("Combustible Lemon (PRESTO version)")
+        self.root.wm_title("combustible-lemon (PRESTO version)")
         self.top_frame = tk.Frame(self.root)
         self.top_frame.pack(side=tk.TOP) 
         self.bottom_frame = tk.Frame(self.root)
@@ -1015,7 +1011,7 @@ def parse_pfd(filename):
 
 def main():
     root = tk.Tk()
-    root.wm_title("Combustible Lemon (PRESTO version)")
+    root.wm_title("combustible-lemon (PRESTO version)")
     root.tk_setPalette(**DEFAULT_PALETTE)
     plotter = GUIMain(root)
     root.mainloop()

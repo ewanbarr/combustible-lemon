@@ -8,6 +8,7 @@ Dependencies
 
  * ImageMagick Command-line Tools (not required if output is not in postscript format)
  * Matplotlib
+ * Numpy
 
 Installation
 ------------
