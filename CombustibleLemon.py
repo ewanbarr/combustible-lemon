@@ -120,12 +120,12 @@ PSRSQL_DB = find_known_pulsar_db()
 DEFAULT_XAXIS   = "P_bary (ms)"
 DEFAULT_YAXIS   = "Sigma"
 BESTPROF_DTYPE  = [
-    ('Best DM',"float32"),('Epoch_bary (MJD)',"float32"),
-    ("P''_bary (s/s^2)","float32"),("P''_topo (s/s^2)","float32"),
-    ("P'_bary (s/s)","float32"),("P'_topo (s/s)","float32"),
-    ('P_bary (ms)',"float32"),('P_topo (ms)',"float32"),
-    ('Sigma',"float32"),('Reduced chi-sqr',"float32"),
-    ('PFD_file',"|S400")
+    ('Best DM',"float32"),('Epoch_bary',"float32"),
+    ('Epoch_topo',"float32"),("P''_bary (s/s^2)","float32"),
+    ("P''_topo (s/s^2)","float32"),("P'_bary (s/s)","float32"),
+    ("P'_topo (s/s)","float32"),('P_bary (ms)',"float32"),
+    ('P_topo (ms)',"float32"),('Sigma',"float32"),
+    ('Reduced chi-sqr',"float32"),('PFD_file',"|S400")
     ]
 PLOTABLE_FIELDS = [key for key,dtype in BESTPROF_DTYPE if dtype=="float32"]
 PLOT_SIZE = (8,5)
@@ -397,10 +397,12 @@ class GUIOptions(object):
         cdata = data_manager.cdata
         class1_id = np.where(cdata["state"]=="class1")
         class2_id = np.where(cdata["state"]=="class2")
+        print "######## Class 1 #########"
         for row in cdata[class1_id]:
-            print row["PFD_file"],"Class 1"
+            print row["PFD_file"]
+        print "######## Class 2 #########"
         for row in cdata[class2_id]:
-            print row["PFD_file"],"Class 2"
+            print row["PFD_file"]
 
     def quit(self):
         msg = "Quitting:\nUnsaved progress will be lost.\nDo you wish to Continue?"
@@ -918,22 +920,27 @@ def parse_bestprof(filename):
         key = line[0].strip()
         value = line[1].strip()
         
-        if value == "N/A":
-            continue
-        
         if "+/-" in value:
             value = value.split("+/-")[0]
             if "inf" in value:
                 value = "0.0"
+
+        if value == "N/A":
+            value = "0.0"
+
+        if "Epoch" in key:
+            key = key.split()[0]
 
         if key == "Prob(Noise)":
             key = "Sigma"
             try:
                 value = value.split("(")[1].split()[0].strip("~")
             except:
-                value = 30.0
+                value = "30.0"
                     
         info[key]=value
+    print info
+    print
     return info
         
 def parse_pfd(filename):
