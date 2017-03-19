@@ -855,7 +855,11 @@ class CandidateFinder(object):
             bestprof_file = "%s.bestprof" % filename
             info = parse_bestprof(bestprof_file)
             for key in PLOTABLE_FIELDS:
-                recarray[ii][key] = info[key]
+                if key in info.keys():
+                    val = info[key]
+                else: 
+                    val = 0
+                recarray[ii][key] = val
             recarray[ii]["PFD_file"] = filename
         return recarray
 
