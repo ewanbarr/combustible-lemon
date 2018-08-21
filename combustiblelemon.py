@@ -703,7 +703,10 @@ class GUIViewerMulti(GUIViewerBase):
         
     def list_select(self,event):
         selected = self.selection_listbox.curselection()[0]
-        index = int(selected.split()[0])
+        try:
+            index = int(selected.split()[0])
+        except:
+            index = int(selected)
         self._position = index
         self.update()
         
