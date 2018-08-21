@@ -277,12 +277,6 @@ class GUIPlotter(object):
         yscale = self.parent.options.yaxis_scale_var.get()
         x = self.data_manager.cdata[x_field]
         y = self.data_manager.cdata[y_field]
-        if x.min() <= 0.0 and xscale == "log":
-            self.parent.options.xaxis_scale_check.invoke()
-            xscale = self.parent.options.xaxis_scale_var.get()
-        if y.min() <= 0.0 and yscale == "log":
-            self.parent.options.yaxis_scale_check.invoke()
-            yscale = self.parent.options.yaxis_scale_var.get()
         self.xy = np.vstack((x,y)).transpose()
         self.ax.set_xscale(xscale)
         self.ax.set_yscale(yscale)
@@ -358,7 +352,7 @@ class GUIOptions(object):
         self.yaxis_scale_var = tk.StringVar()
         self.xaxis_key_var   = tk.StringVar()
         self.yaxis_key_var   = tk.StringVar()
-        self.xaxis_scale_var.set("log")
+        self.xaxis_scale_var.set("symlog")
         self.yaxis_scale_var.set("linear")
         self.xaxis_key_var.set(DEFAULT_XAXIS)
         self.yaxis_key_var.set(DEFAULT_YAXIS)
@@ -462,7 +456,7 @@ class GUIOptions(object):
         selector.configure(width=15,**DEFAULT_STYLE_1)
         check_button = tk.Checkbutton(
             frame,text="Log",variable=scale_var,
-            onvalue='log',offvalue='linear',selectcolor="black")
+            onvalue='symlog',offvalue='linear',selectcolor="black")
         check_button.pack(side=tk.LEFT,expand=1)
         return selector,check_button
 
@@ -709,7 +703,10 @@ class GUIViewerMulti(GUIViewerBase):
         
     def list_select(self,event):
         selected = self.selection_listbox.curselection()[0]
-        index = int(selected.split()[0])
+        try:
+            index = int(selected.split()[0])
+        except:
+            index = int(selected)
         self._position = index
         self.update()
         
